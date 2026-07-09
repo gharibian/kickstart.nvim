@@ -1025,6 +1025,19 @@ require('lazy').setup({
 vim.cmd 'highlight clear SignColumn'
 vim.cmd 'highlight Visual ctermbg=234 ctermfg=202'
 vim.o.termguicolors = false
+
+-- Readable cterm diff colors. Neovim's defaults (blue/cyan/magenta, plus the
+-- gitsigns inline groups linking to TermCursor's reverse video) render as
+-- unreadable pink-on-turquoise in 256-color mode. Use muted green/red instead.
+-- Covers vimdiff (<leader>hd) and the gitsigns hunk preview (<leader>hp).
+local set_hl = vim.api.nvim_set_hl
+set_hl(0, 'DiffAdd', { ctermbg = 22 }) -- added line   (dark green)
+set_hl(0, 'DiffChange', { ctermbg = 237 }) -- changed line (dark grey)
+set_hl(0, 'DiffText', { ctermbg = 58, cterm = { bold = true } }) -- changed text (olive)
+set_hl(0, 'DiffDelete', { ctermbg = 52, ctermfg = 245 }) -- removed line (dark red)
+set_hl(0, 'GitSignsAddInline', { ctermbg = 28 }) -- added words   (green)
+set_hl(0, 'GitSignsDeleteInline', { ctermbg = 88 }) -- removed words (red)
+set_hl(0, 'GitSignsChangeInline', { ctermbg = 58, cterm = { bold = true } }) -- changed words
 vim.opt.number = false
 vim.opt.relativenumber = false
 vim.o.mouse = 'n'
