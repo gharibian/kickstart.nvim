@@ -1029,6 +1029,12 @@ vim.opt.number = false
 vim.opt.relativenumber = false
 vim.o.mouse = 'n'
 
+-- Statusline (the per-split bar showing the file): render the path relative to
+-- cwd via the ':.' modifier instead of the default %f, which prints LSP-opened
+-- (gd) buffers as absolute paths. Evaluated per window, so each split shows its
+-- own file; otherwise mirrors Neovim's default flags + ruler.
+vim.o.statusline = [[%<%{empty(expand('%:.'))?'[No Name]':expand('%:.')} %h%w%m%r%=%-14.(%l,%c%V%) %P]]
+
 -- Global default indent (2-space). Buffer-local overrides (e.g. after/ftplugin/go.lua) win.
 vim.opt.expandtab = true
 vim.opt.shiftwidth = 2
@@ -1038,3 +1044,69 @@ vim.opt.softtabstop = 2
 vim.cmd('autocmd! nvim.swapfile')
 
 vim.opt.list = false
+
+-- Never auto-reload a buffer when the file changes on disk; reload only on an
+-- explicit :e. (autoread defaults ON in Neovim; :e ignores this either way.)
+vim.o.autoread = false
+
+-- Make :e preserve the scroll position (topline) on reload, like Vim does.
+-- Neovim's plain :edit keeps the cursor line but drops the viewport and
+-- recenters; wrap :edit in winsaveview/winrestview to hold the view still.
+vim.api.nvim_create_user_command('E', function(o)
+  local cmd = 'edit' .. (o.bang and '!' or '')
+  if o.args ~= '' then
+    vim.cmd(cmd .. ' ' .. o.args)
+  else
+    local view = vim.fn.winsaveview()
+    vim.cmd(cmd)
+    vim.fn.winrestview(view)
+  end
+end, { nargs = '?', bang = true, complete = 'file' })
+
+-- Route a bare :e (also :e! and :e <file>) through the view-preserving command.
+-- Fires only when the whole command is exactly "e", so :edit/:earlier/etc. are untouched.
+vim.cmd [[cnoreabbrev <expr> e (getcmdtype() ==# ':' && getcmdline() ==# 'e') ? 'E' : 'e']]
+
+-- :ea (Eall) — reload every unmodified, on-disk buffer (a ":e" for all buffers).
+-- Skips buffers with unsaved changes (no prompt) and special buffers
+-- (terminals/help/quickfix). Keeps the current buffer and scroll position.
+vim.api.nvim_create_user_command('Eall', function()
+  local cur = vim.api.nvim_get_current_buf()
+  local view = vim.fn.winsaveview()
+  local reloaded, skipped = 0, 0
+  for _, b in ipairs(vim.fn.getbufinfo { buflisted = 1 }) do
+    local buf = b.bufnr
+    if vim.api.nvim_buf_is_loaded(buf) and vim.bo[buf].buftype == '' and b.name ~= '' and vim.fn.filereadable(b.name) == 1 then
+      if vim.bo[buf].modified then
+        skipped = skipped + 1
+      else
+        vim.api.nvim_buf_call(buf, function()
+          vim.cmd 'edit'
+        end)
+        reloaded = reloaded + 1
+      end
+    end
+  end
+  vim.api.nvim_set_current_buf(cur)
+  vim.fn.winrestview(view)
+  print(string.format('Eall: reloaded %d, skipped %d modified', reloaded, skipped))
+end, {})
+
+-- Let a bare :ea invoke it (user commands must be capitalized; abbreviate to lowercase).
+vim.cmd [[cnoreabbrev <expr> ea (getcmdtype() ==# ':' && getcmdline() ==# 'ea') ? 'Eall' : 'ea']]
+
+-- `nvim f1 f2 f3` opens one vertical split per file, up to 3; any extra files
+-- stay loaded in the buffer list (reach them with <leader><leader>).
+-- Skipped when -O/-o/-p already arranged windows/tabs, or with 0-1 file args.
+-- Deferred + redrawn: VimEnter fires after the first paint, so the split must
+-- run on the next tick or treesitter highlights won't repaint on the new windows.
+vim.api.nvim_create_autocmd('VimEnter', {
+  callback = function()
+    if vim.fn.argc() > 1 and vim.fn.winnr '$' == 1 and vim.fn.tabpagenr '$' == 1 then
+      vim.schedule(function()
+        vim.cmd 'vertical all 3'
+        vim.cmd 'redraw!'
+      end)
+    end
+  end,
+})
