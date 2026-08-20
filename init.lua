@@ -1123,3 +1123,44 @@ vim.api.nvim_create_autocmd('VimEnter', {
     end
   end,
 })
+
+-- <leader>z — zoom the current buffer to its own full-width tab and back
+-- (toggle). Short form of ':tab split' / ':tabclose'; the split layout in the
+-- original tab is left intact, so it's handy for a clean mouse/terminal copy.
+vim.keymap.set('n', '<leader>z', function()
+  if vim.t.zoomed then
+    vim.cmd.tabclose()
+  else
+    vim.cmd 'tab split'
+    vim.t.zoomed = true
+  end
+end, { desc = '[Z]oom buffer to a full-screen tab (toggle)' })
+
+-- <leader>tt — toggle a terminal in a right-hand vertical split. Reuses one
+-- terminal buffer, so hiding/showing keeps the same shell session and
+-- scrollback. Exit terminal-mode with <Esc><Esc> (or <C-\><C-n>), then <C-h>
+-- to jump back to your code. (Raw one-off equivalent: :vsplit | terminal)
+local term = { buf = nil, win = nil }
+vim.keymap.set('n', '<leader>tt', function()
+  if term.win and vim.api.nvim_win_is_valid(term.win) then
+    vim.api.nvim_win_hide(term.win)
+    term.win = nil
+    return
+  end
+  vim.cmd 'botright vsplit'
+  term.win = vim.api.nvim_get_current_win()
+  if term.buf and vim.api.nvim_buf_is_valid(term.buf) then
+    vim.api.nvim_win_set_buf(term.win, term.buf)
+  else
+    vim.cmd 'terminal'
+    term.buf = vim.api.nvim_get_current_buf()
+  end
+  vim.cmd 'startinsert'
+end, { desc = '[T]oggle [t]erminal (vsplit)' })
+
+-- <leader>gs — Telescope picker of changed + untracked files (git status),
+-- with a live diff preview; <CR> opens the file. The "what needs review?"
+-- list without leaving Neovim. (Lazy-require so it doesn't load telescope at startup.)
+vim.keymap.set('n', '<leader>gs', function()
+  require('telescope.builtin').git_status()
+end, { desc = '[G]it [S]tatus (changed files)' })
