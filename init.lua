@@ -945,28 +945,92 @@ require('lazy').setup({
   -- },
   { -- Highlight, edit, and navigate code
     'nvim-treesitter/nvim-treesitter',
+    branch = 'main',
+    lazy = false, -- upstream: "This plugin does not support lazy-loading"
     build = ':TSUpdate',
-    main = 'nvim-treesitter.configs', -- Sets main module to use for opts
-    -- [[ Configure Treesitter ]] See `:help nvim-treesitter`
-    opts = {
-      ensure_installed = { 'bash', 'c', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'vim', 'vimdoc' },
-      -- Autoinstall languages that are not installed
-      auto_install = true,
-      highlight = {
-        enable = true,
-        -- Some languages depend on vim's regex highlighting system (such as Ruby) for indent rules.
-        --  If you are experiencing weird indenting issues, add the language to
-        --  the list of additional_vim_regex_highlighting and disabled languages for indent.
-        additional_vim_regex_highlighting = { 'ruby' },
-      },
-      indent = { enable = true, disable = { 'ruby' } },
-    },
-    -- There are additional nvim-treesitter modules that you can use to interact
-    -- with nvim-treesitter. You should go explore a few and see what interests you:
-    --
-    --    - Incremental selection: Included, see `:help nvim-treesitter-incremental-selection-mod`
-    --    - Show your current context: https://github.com/nvim-treesitter/nvim-treesitter-context
-    --    - Treesitter + textobjects: https://github.com/nvim-treesitter/nvim-treesitter-textobjects
+    config = function()
+      -- [[ Configure Treesitter ]] See `:help nvim-treesitter`
+      --
+      -- The `main` branch dropped the `nvim-treesitter.configs` module system:
+      -- parsers are installed with `install()`, and highlight/indent are turned
+      -- on per buffer through the native `vim.treesitter.*` API. It also deleted
+      -- the custom query directives `master` relied on (set-lang-from-info-string!,
+      -- #downcase!, set-lang-from-mimetype!), which assumed the pre-0.11 match
+      -- API -- under nvim 0.12 those threw "attempt to call method 'range'
+      -- (a nil value)" on markdown, bash and html buffers.
+      local ts = require 'nvim-treesitter'
+
+      ts.install {
+        'bash',
+        'c',
+        'diff',
+        'html',
+        'lua',
+        'luadoc',
+        'markdown',
+        'markdown_inline',
+        'query',
+        'swift',
+        'vim',
+        'vimdoc',
+      }
+
+      -- Some languages depend on vim's regex highlighting system (such as Ruby)
+      -- for indent rules. Keep vim syntax alongside treesitter for those, and
+      -- leave their indenting to vim rather than the treesitter indent query.
+      local vim_regex_highlight = { ruby = true }
+      local no_treesitter_indent = { ruby = true }
+
+      ---@param buf integer
+      ---@param language string
+      local function try_attach(buf, language)
+        -- Runs on a deferred callback after an async install, by which point the
+        -- buffer may already be gone (scrolling a telescope preview does this),
+        -- so re-check before touching it.
+        if not vim.api.nvim_buf_is_valid(buf) then
+          return
+        end
+        -- Loads the parser; returns false when there isn't one for this language
+        if not vim.treesitter.language.add(language) then
+          return
+        end
+        vim.treesitter.start(buf, language)
+
+        if vim_regex_highlight[language] then
+          vim.bo[buf].syntax = 'ON'
+        end
+
+        -- Without an indents query the indentexpr would fall back to vim's anyway
+        if not no_treesitter_indent[language] and vim.treesitter.query.get(language, 'indents') then
+          vim.bo[buf].indentexpr = "v:lua.require'nvim-treesitter'.indentexpr()"
+        end
+      end
+
+      local available = ts.get_available()
+      vim.api.nvim_create_autocmd('FileType', {
+        desc = 'Start treesitter highlighting/indent, installing the parser on demand',
+        callback = function(args)
+          local buf, filetype = args.buf, args.match
+
+          local language = vim.treesitter.language.get_lang(filetype)
+          if not language then
+            return
+          end
+
+          if vim.tbl_contains(ts.get_installed 'parsers', language) then
+            try_attach(buf, language)
+          elseif vim.tbl_contains(available, language) then
+            -- The `auto_install = true` equivalent: fetch it, then attach
+            ts.install(language):await(function()
+              try_attach(buf, language)
+            end)
+          else
+            -- Parser may still exist outside nvim-treesitter (nvim ships a few)
+            try_attach(buf, language)
+          end
+        end,
+      })
+    end,
   },
 
   -- The following comments only work if you have downloaded the kickstart repo, not just copy pasted the
